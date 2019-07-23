@@ -34,13 +34,13 @@ RIP:真实IP地址
 DIP:调度器连接节点上使用的IP地址
 
 LVS工作模式:
-VS/NAT
+VS/NAT(-m)
    -通过网络地址转换实现的虚拟服务器
    -大并发访问时,调度器的性能成为瓶颈
-VS/DR
+VS/DR(-g)
   -直接使用路由技术实现虚拟服务器
   -节点服务器需要配置VIP,注意MAC地址广播
-VS/TUN
+VS/TUN(-i)
   -通过隧道方式实现虚拟服务器
 
 
@@ -50,9 +50,9 @@ VS/TUN
 负载均衡调度算法
 LVS目前实现了10种调度算法
 常用调度算法:
-轮询(rr) :将客户端请求平均发到Real Server.
-加权轮询(wrr):根据Real Server 权重值进行轮询问调度.
-最少连接(lc):选择连接数最少的服务器.
+轮询(rr)Rount Robin :将客户端请求平均发到Real Server.
+加权轮询(wrr)Weighted Round Robin:根据Real Server 权重值进行轮询调度.
+最少连接(lc)Least Connections:选择连接数最少的服务器.
 加权最少连接(wlc):根据Real Server权重值,选择连接数最少的服务器.
 源地址散列(Source Hashing):根据请求的目标IP地址,作为散列键(Hash Key)
 的散列表找出对应服务器.相当于nginx中的ip_hash.
@@ -79,17 +79,20 @@ ipvsadm -L        #查看lvs规则表
 ipvsadm -A -t|u 192.168.4.5:80  -s 算法   
 ipvsadm -E -t|u 192.168.4.5:80  -s 算法
 ipvsadm -D -t|u 192.168.4.5:80  
-ipvsadm -C    
-ipvsadm -a -t|u 192.168.4.5:80 -r 192.168.2.100 [-g]
-ipvsadm -e 
-ipvsadm -d
+ipvsadm -C 
+ipvsadm -a -t|u 192.168.4.5:80 -r 192.168.2.100 [-g|i|m] [-m]
+ipvsadm -e -t|u 192.168.4.5:80 -r 192.168.2.100 [-g|i|m] [-m]
+ipvsadm -d -t|u 192.168.4.5:80 -r 192.168.2.100
 ipvsadm -Ln 
 
 注意!!!以上命令都是临时命令,重启后丢失
 永久保存设置方式为:ipvsadm-save -n  > /etc/sysconfig/ipvsadm
 
+临时开启调度器的路由转发功能
+[root@proxy ~]# echo 1 > /proc/sys/net/ipv4/ip_forward
 
-
+永久开启调度器的路由转发功能
+[root@proxy ~]# echo "net.ipv4.ip_forward = 1" >> /etc/sysctl.conf
 
 
 

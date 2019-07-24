@@ -1,0 +1,332 @@
+Keepalived高可用
+用软件来模拟ip_forward
+开源
+
+               lvs(keepalived)     web1
+电脑    vip
+               lvs(keepalived)     web2
+
+keepalived功能(可以单独用):
+1.实现VRRP(vip)
+2.自动配置LVS规则 d -a
+a)包括动态修改
+3.健康检查功能
+
+
+
+安装Keepalived软件
+注意：两台Web服务器做相同的操作。
+[root@web1 ~]# yum install -y keepalived
+[root@web2 ~]# yum install -y keepalived 
+
+部署Keepalived服务
+1）修改web1服务器Keepalived配置文件
+[root@web1 ~]# vim /etc/keepalived/keepalived.conf
+global_defs {							#全局设置
+  notification_email {
+    admin@tarena.com.cn          	#设置报警收件人邮箱
+  }
+  notification_email_from ka@localhost	#设置发件人
+  smtp_server 127.0.0.1            	#定义邮件服务器
+  smtp_connect_timeout 30
+  router_id  web1                 		#设置路由ID号（实验需要修改）
+}
+vrrp_instance VI_1 {					#核心
+  state MASTER            		#主服务器为MASTER（备服务器需要修改为BACKUP）
+  interface eth0           				#定义网络接口
+  virtual_router_id 51        			#主备服务器VRID号必须一致
+  priority 100           				#服务器优先级,优先级高优先获取VIP
+  advert_int 1
+  authentication {
+    auth_type pass
+    auth_pass 1111             		#主备服务器密码必须一致
+  }
+  virtual_ipaddress {        			#谁是主服务器谁获得该VIP（实验需要修改）
+192.168.4.80 
+}    
+}
+
+若攻击者自己再塔一个keepalived 将优先级改成200, 则访问都过去了
+所以需要做密码
+
+启动服务
+[root@web1 ~]# systemctl start keepalived
+[root@web2 ~]# systemctl start keepalived
+
+配置防火墙和SELinux
+启动keepalived会自动添加一个drop的防火墙规则，需要清空！
+Firewall 所有的修改都是在iptables里
+[root@web1 ~]# iptables -F			#-F清空的意思
+[root@web2 ~]# iptables -F
+[root@web1 ~]# setenforce 0
+[root@web2 ~]# setenforce 0
+
+只要起keepalived 就会起防火墙 
+因为防火墙拒绝所有
+iptables 在内核 关不了 只能清空规则
+
+
+Keepalived+LVS服务器
+
+配置网络环境
+[root@web2 ~]# systemctl stop keepalived
+
+调度器安装Keepalived与ipvsadm软件
+注意：两台LVS调度器执行相同的操作（如何已经安装软件，可用忽略此步骤）。
+安装软件
+[root@proxy1 ~]# yum install -y keepalived
+[root@proxy1 ~]# systemctl enable keepalived
+[root@proxy1 ~]# yum install -y ipvsadm		#查看keepalived自动配的规则
+[root@proxy1 ~]# ipvsadm -C					#清掉之前配置的规则
+
+
+部署Keepalived实现LVS-DR模式调度器的高可用
+1）LVS1调度器设置Keepalived，并启动服务
+[root@proxy1 ~]# vim /etc/keepalived/keepalived.conf
+global_defs {
+  notification_email {
+    admin@tarena.com.cn                //设置报警收件人邮箱
+  }
+  notification_email_from ka@localhost    //设置发件人
+  smtp_server 127.0.0.1                //定义邮件服务器
+  smtp_connect_timeout 30
+  router_id  lvs1                        //设置路由ID号(实验需要修改)
+}
+vrrp_instance VI_1 {
+  state MASTER                             //主服务器为MASTER
+  interface eth0                        //定义网络接口
+  virtual_router_id 50                    //主辅VRID号必须一致
+  priority 100                         //服务器优先级
+  advert_int 1
+  authentication {
+    auth_type pass
+    auth_pass 1111                       //主辅服务器密码必须一致
+  }
+  virtual_ipaddress {                   //配置VIP（实验需要修改）
+192.168.4.15 
+ }   
+}
+virtual_server 192.168.4.15 80 {        //设置ipvsadm的VIP规则（实验需要修改）
+#相当于ipvsadm -A
+  delay_loop 6
+  lb_algo wrr                          //设置LVS调度算法为WRR
+  lb_kind DR                               //设置LVS的模式为DR
+  #persistence_timeout 50
+#注意这样的作用是保持连接，开启后，客户端在一定时间(50秒)内始终访问相同服务器
+#persistence	: 保持
+  protocol TCP
+  real_server 192.168.4.100 80 {         //设置后端web服务器真实IP（实验需要修改）
+    weight 1                             //设置权重为1
+    TCP_CHECK {                            //对后台real_server做健康检查
+    connect_timeout 3
+    nb_get_retry 3
+    delay_before_retry 3
+    }
+  }
+ real_server 192.168.4.200 80 {       //设置后端web服务器真实IP（实验需要修改）
+    weight 2                          //设置权重为2
+    TCP_CHECK {
+    connect_timeout 3					#连接超时时间3秒
+    nb_get_retry 3						#ping3次
+    delay_before_retry 3				#延时3秒后再ping1次
+    }
+  }
+}
+[root@proxy1 ~]# systemctl start keepalived
+[root@proxy_2 ~]# iptables -F 
+
+支持三种健康检查
+tcp_check  端口在则网站在, 不用加哈希值, 网站等
+http_get 
+ssl_get
+
+
+
+LVS2调度器设置Keepalived
+[root@proxy2 ~]# vim /etc/keepalived/keepalived.conf
+global_defs {
+  notification_email {
+    admin@tarena.com.cn                //设置报警收件人邮箱
+  }
+  notification_email_from ka@localhost    //设置发件人
+  smtp_server 127.0.0.1                //定义邮件服务器
+  smtp_connect_timeout 30
+  router_id  lvs2                        //设置路由ID号（实验需要修改）
+}
+vrrp_instance VI_1 {
+  state BACKUP                             //从服务器为BACKUP（实验需要修改）
+  interface eth0                        //定义网络接口
+  virtual_router_id 50                    //主辅VRID号必须一致
+  priority 50                             //服务器优先级（实验需要修改）
+  advert_int 1
+  authentication {
+    auth_type pass
+    auth_pass 1111                       //主辅服务器密码必须一致
+  }
+  virtual_ipaddress {                   //设置VIP（实验需要修改）
+192.168.4.15  
+}  
+}
+virtual_server 192.168.4.15 80 {          //自动设置LVS规则（实验需要修改）
+  delay_loop 6
+  lb_algo wrr                          //设置LVS调度算法为WRR
+  lb_kind DR                               //设置LVS的模式为DR
+ # persistence_timeout 50
+#注意这样的作用是保持连接，开启后，客户端在一定时间内始终访问相同服务器
+  protocol TCP
+  real_server 192.168.4.100 80 {        //设置后端web服务器的真实IP（实验需要修改）
+    weight 1                              //设置权重为1
+    TCP_CHECK {                         //对后台real_server做健康检查
+    connect_timeout 3
+    nb_get_retry 3
+    delay_before_retry 3
+    }
+  }
+ real_server 192.168.4.200 80 {         //设置后端web服务器的真实IP（实验需要修改）
+    weight 2                              //设置权重为2
+    TCP_CHECK {
+    connect_timeout 3
+    nb_get_retry 3
+    delay_before_retry 3
+    }
+  }
+[root@proxy2 ~]# systemctl start keepalived
+[root@proxy2 ~]# ipvsadm -Ln                 #查看LVS规则
+[root@proxy2 ~]# ip  a   s                    #查看VIP设置
+[root@proxy_2 ~]# iptables -F 
+
+
+
+Nginx分析
+--工作在7层,可以针对http做分流策略
+--1.9版本开始支持4层代理
+--正则表达式比HAProxy强大
+--安装, 配置, 测试简单, 通过日志可以解决多数问题
+--并发量可以达到几万次
+--nginx还可以作为web服务器使用
+缺点:
+--仅支持http, https, mail协议, 应用面小
+--监控检查仅通过端口, 无法使用url检查
+--url检查: 具体页面检查
+
+LVS分析
+优点:
+--负载能力强, 工作在4层, 对内存, CPU消耗低
+--配置性低, 没有太多可配置性, 减少人为错误
+--应用面广, 几乎可以为所有应用提供负载均衡
+缺点:
+--不支持正则表达式, 不能实现动静分离
+--如果网站架构庞大, LVS-DR配置比较繁琐
+
+HAProxy分析
+优点:
+--支持session, cookie功能
+--可以通过url进行健康检查
+--效率, 负载均衡速度, 高于Nginx, 低于LVS
+--HAProxy支持TCP, 可以对MyAQL进行负载均衡
+--调度算法丰富
+缺点:
+--正则弱于Nginx
+--日志依赖于syslogd
+
+
+
+haproxy两种模式格式:
+一.
+frontend 名称 *:80				#frontend前端
+use_backend 名称			#名称都一样
+backend 名称					#backend后端
+balance roundrobin			#roundrobin(轮询)
+server  web1
+server  web2
+
+二.
+listen 名称 *:80
+balance roundrobin
+server web1
+server web2
+
+将前面实验VIP、LVS等实验的内容清理干净！！！！！！
+删除所有设备的VIP，清空所有LVS设置，关闭keepalived！！！
+
+web1 和 web2
+[root@web1 network-scripts]# cd /etc/sysconfig/network-scripts/
+[root@web1 network-scripts]# rm -rf ifcfg-lo:0
+[root@web1 network-scripts]# systemctl restart network
+
+或
+web1关闭多余的网卡与VIP，配置本地真实IP地址。
+[root@web1 ~]# ifdown eth0
+[root@web1 ~]# ifdown lo:0
+[root@web1 ~]# nmcli connection modify eth1 ipv4.method manual \
+ipv4.addresses 192.168.2.100/24 connection.autoconnect yes
+[root@web1 ~]# nmcli connection up eth1
+
+proxy关闭keepalived服务，清理LVS规则。
+[root@proxy ~]# systemctl stop keepalived
+[root@proxy ~]# systemctl disable keepalived
+[root@proxy ~]# ipvsadm -C
+[root@proxy ~]# nmcli connection modify eth0 ipv4.method manual \
+ipv4.addresses 192.168.4.5/24 connection.autoconnect yes
+[root@proxy ~]# nmcli connection up eth0
+[root@proxy ~]# nmcli connection modify eth1 ipv4.method manual \
+ipv4.addresses 192.168.2.5/24 connection.autoconnect yes
+[root@proxy ~]# nmcli connection up eth1
+
+
+部署HAProxy服务器
+1）配置网络，安装软件
+[root@haproxy ~]# yum -y install haproxy
+
+修改配置文件
+[root@haproxy ~]# vim /etc/haproxy/haproxy.cfg
+global
+ log 127.0.0.1 local2   					#[err warning info debug]
+ chroot /usr/local/haproxy
+ pidfile /var/run/haproxy.pid 			#haproxy的pid存放路径
+ maxconn 4000     					#最大连接数，默认4000
+ user haproxy							#这个用户装包后创建, 启动用户
+ group haproxy
+ daemon       						#创建1个进程进入deamon模式运行
+defaults
+ mode http    					
+#默认的模式mode { tcp|http|health } log global   
+#采用全局定义的日志
+ 								#tcp即四层负载均衡,health 健康检查
+ option dontlognull  					#不记录健康检查的日志信息
+ option httpclose  						#每次请求完毕后主动关闭http通道
+ option httplog   						#日志类别http日志格式
+ option forwardfor  			#后端服务器可以从Http Header中获得客户端ip
+ option redispatch 				#serverid服务器挂掉后强制定向到其他健康服务器
+ timeout connect 10000 				#如果backend没有指定，默认为10s
+ timeout client 300000 					#客户端连接超时, 毫秒
+ timeout server 300000				#服务器连接超时
+ maxconn  60000						#最大连接数
+ retries  3   					#3次连接失败就认为服务不可用，也可以通过后面设置
+listen stats 0.0.0.0:1080   				#监听端口
+    stats refresh 30s   					#统计页面自动刷新时间
+    stats uri /stats   					#统计页面url
+    stats realm Haproxy Manager 		#进入管理解面查看状态信息
+    stats auth admin:admin  			#统计页面用户名和密码设置
+  #stats hide-version   				#隐藏统计页面上HAProxy的版本信息
+listen  websrv-rewrite 0.0.0.0:80
+   balance roundrobin
+   server  web1 192.168.2.100:80 check inter 2000 rise 2 fall 5
+   server  web2 192.168.2.200:80 check inter 2000 rise 2 fall 5
+#chec以后是健康检查 2s检查一次,5次访问不了就认为坏了,连续访问2次成功,就认为好了
+
+
+[root@proxy ~]# firefox http://192.168.4.5
+
+Queue队列数据的信息（当前队列数量，最大值，队列限制数量）；
+Session rate每秒会话率（当前值，最大值，限制数量）；
+Sessions总会话量（当前值，最大值，总量，Lbtot: total number of times a server was selected选中一台服务器所用的总时间）；
+Bytes（入站、出站流量）；
+Denied（拒绝请求、拒绝回应）；
+Errors（错误请求、错误连接、错误回应）；
+Warnings（重新尝试警告retry、重新连接redispatches）；
+Server(状态、最后检查的时间（多久前执行的最后一次检查）、权重、备份服务器数量、down机服务器数量、down机时长)。
+
+[root@web1 ~]# vim /etc/httpd/conf/httpd.conf 
+[root@web1 ~]# systemctl restart httpd
+ServerName www.example.com:80			#取消注释, 加快启服务的速度

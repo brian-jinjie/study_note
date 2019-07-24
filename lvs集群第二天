@@ -7,7 +7,7 @@ Keepalived高可用
                lvs(keepalived)     web2
 
 keepalived功能(可以单独用):
-1.实现VRRP(vip)
+1.实现VRRP(vip)(虚拟路由热备协议)
 2.自动配置LVS规则 d -a
 a)包括动态修改
 3.健康检查功能

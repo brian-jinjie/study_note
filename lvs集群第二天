@@ -284,12 +284,12 @@ global
  log 127.0.0.1 local2   					#[err warning info debug]
  chroot /usr/local/haproxy
  pidfile /var/run/haproxy.pid 			#haproxy的pid存放路径
- maxconn 4000     					#最大连接数，默认4000
+ maxconn 4000     					#最大连接数，全局链接数不能超过4000
  user haproxy							#这个用户装包后创建, 启动用户
  group haproxy
  daemon       						#创建1个进程进入deamon模式运行
 defaults
- mode http    					
+ mode http     #默认模式为http    					
 #默认的模式mode { tcp|http|health } log global   
 #采用全局定义的日志
  								#tcp即四层负载均衡,health 健康检查
@@ -330,3 +330,19 @@ Server(状态、最后检查的时间（多久前执行的最后一次检查）�
 [root@web1 ~]# vim /etc/httpd/conf/httpd.conf 
 [root@web1 ~]# systemctl restart httpd
 ServerName www.example.com:80			#取消注释, 加快启服务的速度
+
+
+两种做集群的格式:
+第一种:
+frontend 名称 *:80 
+use_backend abc 
+backend abc
+blance roundrobin
+server web 1
+server web 2 
+
+第二
+listen 名称 *:80
+balance roundrobin
+server web1
+server web2
